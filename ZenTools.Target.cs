@@ -13,7 +13,6 @@ public class ZenToolsTarget : TargetRules
 		LaunchModuleName = "ZenTools";
 
 		bBuildDeveloperTools = false;
-		bUseMallocProfiler = false;
 		bCompileWithPluginSupport = false;
 		bIncludePluginsForTargetPlatforms = false;
 

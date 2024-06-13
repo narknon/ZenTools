@@ -116,6 +116,7 @@ bool FIOStoreTools::ExtractPackagesFromContainers( const FString& ContainerDirPa
 
 	for ( const TSharedPtr<FIoStoreReader>& Reader : ContainerReaders )
 	{
+	    UE_LOG( LogIoStoreTools, Display, TEXT("New Container") );
 		PackageMap->PopulateFromContainer( Reader );
 	}
 	UE_LOG( LogIoStoreTools, Display, TEXT("Populated Package Map with %d Packages"), PackageMap->GetTotalPackageCount() );

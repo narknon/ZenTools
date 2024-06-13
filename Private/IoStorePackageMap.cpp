@@ -1,9 +1,13 @@
 ﻿// Copyright Nikita Zolotukhin. All Rights Reserved.
 
 #include "IoStorePackageMap.h"
+
+#include <string>
+
 #include "Serialization/LargeMemoryReader.h"
 #include "Serialization/MemoryReader.h"
 #include "IO/IoContainerHeader.h"
+#include "IO/IoStore.h"
 
 void FIoStorePackageMap::SetDefaultZenPackageVersion(EZenPackageVersion NewDefaultPackageVersion)
 {
@@ -41,8 +45,6 @@ void FIoStorePackageMap::PopulateFromContainer(const TSharedPtr<FIoStoreReader>&
 			
 			PackageHeader.ImportedPackages = TArrayView<FPackageId>(ContainerEntry.ImportedPackages.Data(), ContainerEntry.ImportedPackages.Num());
 			PackageHeader.ShaderMapHashes = TArrayView<FSHAHash>(ContainerEntry.ShaderMapHashes.Data(), ContainerEntry.ShaderMapHashes.Num());
-			PackageHeader.ExportCount = ContainerEntry.ExportCount;
-			PackageHeader.ExportBundleCount = ContainerEntry.ExportBundleCount;
 			
 			PackageIdsInThisContainer.Add(PackageId);
 		}
@@ -55,8 +57,6 @@ void FIoStorePackageMap::PopulateFromContainer(const TSharedPtr<FIoStoreReader>&
 			
 			PackageHeader.ImportedPackages = TArrayView<FPackageId>(ContainerEntry.ImportedPackages.Data(), ContainerEntry.ImportedPackages.Num());
 			PackageHeader.ShaderMapHashes = TArrayView<FSHAHash>(ContainerEntry.ShaderMapHashes.Data(), ContainerEntry.ShaderMapHashes.Num());
-			PackageHeader.ExportCount = ContainerEntry.ExportCount;
-			PackageHeader.ExportBundleCount = ContainerEntry.ExportBundleCount;
 			
 			OptionalPackageIdsInThisContainer.Add(PackageId);
 		}
@@ -65,9 +65,10 @@ void FIoStorePackageMap::PopulateFromContainer(const TSharedPtr<FIoStoreReader>&
 	// Iterate package chunks from the header
 	for ( const FPackageId& PackageId : PackageIdsInThisContainer )
 	{
+		uint64 PackageId2 = PackageId.Value();
 		// Optional chunk has index 1, required one has index 0
-		const FIoChunkId ChunkId = CreateIoChunkId( PackageId.Value(), 0, EIoChunkType::ExportBundleData );
-		
+		const FIoChunkId ChunkId = CreateIoChunkId( PackageId2, 0, EIoChunkType::ExportBundleData );
+		UE_LOG( LogIoStore, Display, TEXT("New Chunk %llu"),  PackageId2);
 		TIoStatusOr<FIoStoreTocChunkInfo> ChunkInfo = Reader->GetChunkInfo( ChunkId );
 		TIoStatusOr<FIoBuffer> PackageBuffer = Reader->Read( ChunkId, FIoReadOptions() );
 		checkf( PackageBuffer.IsOk(), TEXT("Failed to find ChunkId %s for PackageId 0x%llx in ContainerId 0x%llx (ChunkInfo valid: %d)"),
@@ -333,17 +334,19 @@ FPackageMapExportBundleEntry* FIoStorePackageMap::ReadExportBundleData( const FP
 	}
 
 	// Read export bundles
-	const FExportBundleHeader* ExportBundleHeaders = reinterpret_cast<const FExportBundleHeader*>(PackageSummaryData + PackageSummary->GraphDataOffset);
+	const FDependencyBundleHeader* ExportBundleHeaders = reinterpret_cast<const FDependencyBundleHeader*>(PackageSummaryData + PackageSummary->DependencyBundleHeadersOffset);
 	const FExportBundleEntry* ExportBundleEntries = reinterpret_cast<const FExportBundleEntry*>(PackageSummaryData + PackageSummary->ExportBundleEntriesOffset);
 	uint64 CurrentExportOffset = PackageSummary->HeaderSize;
 	
 	for ( int32 ExportBundleIndex = 0; ExportBundleIndex < PackageHeader.ExportBundleCount; ExportBundleIndex++ )
 	{
 		TArray<FExportBundleEntry>& ExportBundles = PackageData.ExportBundles.AddDefaulted_GetRef();
-		const FExportBundleHeader* ExportBundle = ExportBundleHeaders + ExportBundleIndex;
+		const FDependencyBundleHeader* ExportBundle = ExportBundleHeaders + ExportBundleIndex;
 		
 		const FExportBundleEntry* BundleEntry = ExportBundleEntries + ExportBundle->FirstEntryIndex;
-		const FExportBundleEntry* BundleEntryEnd = BundleEntry + ExportBundle->EntryCount;
+		
+		const FExportBundleEntry* BundleEntryEnd = (FExportBundleEntry*)((PackageSummary->ExportBundleEntriesOffset - PackageSummary->ExportMapOffset) / sizeof(FExportMapEntry));
+		
 		check(BundleEntry <= BundleEntryEnd);
 		
 		while (BundleEntry < BundleEntryEnd)
@@ -361,8 +364,8 @@ FPackageMapExportBundleEntry* FIoStorePackageMap::ReadExportBundleData( const FP
 	}
 
 	// Read arcs, they are needed to create a list of preload dependencies for this package
-	const uint64 ExportBundleHeadersSize = sizeof(FExportBundleHeader) * PackageHeader.ExportBundleCount;
-	const uint64 ArcsDataOffset = PackageSummary->GraphDataOffset + ExportBundleHeadersSize;
+	const uint64 ExportBundleHeadersSize = sizeof(FDependencyBundleHeader) * PackageHeader.ExportBundleCount;
+	const uint64 ArcsDataOffset = PackageSummary->DependencyBundleHeadersOffset + ExportBundleHeadersSize;
 	const uint64 ArcsDataSize = PackageSummary->HeaderSize - ArcsDataOffset;
 
 	FMemoryReaderView ArcsAr(MakeArrayView<const uint8>(PackageSummaryData + ArcsDataOffset, ArcsDataSize));
